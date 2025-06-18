@@ -1,6 +1,9 @@
 package db
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type Engine struct {
 	wal  *WAL
@@ -47,6 +50,29 @@ func (e *Engine) Execute(cmd string) string {
 			return val
 		}
 		return "Key not found"
+
+	case "DELETE":
+		if len(parts) != 2 {
+			return "Usage: DELETE key"
+		}
+		e.tree.Delete(parts[1])
+		e.wal.Delete(parts[1])
+		// Optionally, you could log deletion in the WAL (not implemented here)
+		return "Deleted"
+
+	case "SCAN":
+		if len(parts) != 3 {
+			return "Usage: SCAN startKey endKey"
+		}
+		results := e.tree.RangeQuery(parts[1], parts[2])
+		if len(results) == 0 {
+			return "No results"
+		}
+		var sb strings.Builder
+		for k, v := range results {
+			sb.WriteString(fmt.Sprintf("%s: %s\n", k, v))
+		}
+		return strings.TrimRight(sb.String(), "\n")
 
 	default:
 		return "Unknown command"

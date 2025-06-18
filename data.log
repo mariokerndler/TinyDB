@@ -1,4 +1,4 @@
 SET foo bar
-SET hello world
 SET abc 123
-SET xyz 789
+SET xyz 890
+DELETE foo
