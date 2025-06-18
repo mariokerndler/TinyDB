@@ -1,2 +1,4 @@
 SET foo bar
-SET test 123
+SET hello world
+SET abc 123
+SET xyz 789

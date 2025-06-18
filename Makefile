@@ -3,3 +3,6 @@ build:
 
 run: build 
 	./TinySQL
+
+test: 
+	go test ./internal/db/ -v

@@ -33,4 +33,7 @@ go.work.sum
 
 # MacOS
 .DS_Store
+
+# Other Files
 TinySQL
+*.log

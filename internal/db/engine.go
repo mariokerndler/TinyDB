@@ -9,7 +9,7 @@ type Engine struct {
 
 func NewEngine(logPath string) *Engine {
 	wal := NewWAL(logPath)
-	tree := NewBTree()
+	tree := NewBPlusTree()
 
 	// Recover data from WAL
 	entries, err := wal.Replay()
