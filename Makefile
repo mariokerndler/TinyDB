@@ -1,8 +1,18 @@
+.PHONY: all build test fmt lint tidy
+
+all: test
+
 build:
-	go build -o TinySQL ./cmd
+	go build ./...
 
-run: build 
-	./TinySQL
+test:
+	go test ./...
 
-test: 
-	go test ./internal/db/ -v
+fmt:
+	go fmt ./...
+
+lint:
+	golangci-lint run
+
+tidy:
+	go mod tidy
