@@ -6,65 +6,103 @@ import (
 	"testing"
 )
 
-func TestEngine_Execute(t *testing.T) {
-	path := "test_engine.log"
-	defer os.Remove(path)
+func setupTestEngine(t *testing.T) *Engine {
+	t.Helper()
 
-	eng := NewEngine(path)
+	logPath := "test_wal.log"
+	_ = os.Remove(logPath) // clean old log if present
 
-	// SET and GET
-	result := eng.Execute("SET a apple")
-	if result != "OK" {
-		t.Errorf("SET failed: %s", result)
+	engine := NewEngine(logPath)
+
+	t.Cleanup(func() {
+		os.Remove(logPath)
+	})
+	return engine
+}
+
+func TestEngineInsertAndSelectAll(t *testing.T) {
+	e := setupTestEngine(t)
+
+	insert := `INSERT INTO mytable VALUES (a, 1), (b, 2), (c, 3)`
+	resp := e.Execute(insert)
+	if resp != "OK" {
+		t.Fatalf("Expected OK, got %q", resp)
 	}
 
-	result = eng.Execute("GET a")
-	if result != "apple" {
-		t.Errorf("GET a = %s; want apple", result)
-	}
+	selectAll := `SELECT * FROM mytable`
+	resp = e.Execute(selectAll)
+	expectedLines := []string{"a: 1", "b: 2", "c: 3"}
 
-	result = eng.Execute("GET b")
-	if result != "Key not found" {
-		t.Errorf("GET b = %s; want Key not found", result)
-	}
-
-	result = eng.Execute("SET a apricot")
-	if result != "OK" {
-		t.Errorf("SET overwrite failed: %s", result)
-	}
-
-	result = eng.Execute("GET a")
-	if result != "apricot" {
-		t.Errorf("Updated GET a = %s; want apricot", result)
-	}
-
-	// DELETE
-	result = eng.Execute("DELETE a")
-	if result != "Deleted" {
-		t.Errorf("DELETE failed: %s", result)
-	}
-
-	result = eng.Execute("GET a")
-	if result != "Key not found" {
-		t.Errorf("GET after DELETE = %s; want Key not found", result)
-	}
-
-	// SET multiple keys for SCAN
-	eng.Execute("SET a alpha")
-	eng.Execute("SET b beta")
-	eng.Execute("SET c cherry")
-	eng.Execute("SET d date")
-	eng.Execute("SET e elderberry")
-
-	result = eng.Execute("SCAN b d")
-	expectedKeys := []string{"b: beta", "c: cherry", "d: date"}
-	for _, expected := range expectedKeys {
-		if !strings.Contains(result, expected) {
-			t.Errorf("SCAN missing %q in result:\n%s", expected, result)
+	for _, line := range expectedLines {
+		if !strings.Contains(resp, line) {
+			t.Errorf("Expected result to contain %q, got:\n%s", line, resp)
 		}
 	}
+}
 
-	if strings.Contains(result, "a:") || strings.Contains(result, "e:") {
-		t.Errorf("SCAN result should not include 'a' or 'e':\n%s", result)
+func TestEngineSelectWithWhere(t *testing.T) {
+	e := setupTestEngine(t)
+	e.Execute(`INSERT INTO mytable VALUES (foo, bar)`)
+
+	resp := e.Execute(`SELECT * FROM mytable WHERE key = foo`)
+	if resp != "bar" {
+		t.Fatalf("Expected 'bar', got %q", resp)
+	}
+}
+
+func TestEngineSelectMissingKey(t *testing.T) {
+	e := setupTestEngine(t)
+	resp := e.Execute(`SELECT * FROM mytable WHERE key = nope`)
+	if resp != "Key not found" {
+		t.Fatalf("Expected 'Key not found', got %q", resp)
+	}
+}
+
+func TestEngineDelete(t *testing.T) {
+	e := setupTestEngine(t)
+	e.Execute(`INSERT INTO mytable (key, value) VALUES (z, 99)`)
+
+	del := e.Execute(`DELETE FROM mytable WHERE key = z`)
+	if del != "Deleted" {
+		t.Fatalf("Expected 'Deleted', got %q", del)
+	}
+
+	get := e.Execute(`SELECT * FROM mytable WHERE key = z`)
+	if get != "Key not found" {
+		t.Fatalf("Expected 'Key not found' after delete, got %q", get)
+	}
+}
+
+func TestEngineInvalidSyntax(t *testing.T) {
+	e := setupTestEngine(t)
+
+	resp := e.Execute(`INSERT INTO`)
+	if !strings.HasPrefix(resp, "Parse error:") {
+		t.Fatalf("Expected parse error, got %q", resp)
+	}
+}
+
+func TestEngineUnsupportedStatement(t *testing.T) {
+	e := setupTestEngine(t)
+
+	// Force a bad type (simulated manually)
+	resp := e.Execute(`UPDATE table SET key = val`) // not supported
+	if !strings.HasPrefix(resp, "Parse error:") {
+		t.Fatalf("Expected parse error, got %q", resp)
+	}
+}
+
+func TestEngineDropTable(t *testing.T) {
+	e := setupTestEngine(t)
+
+	e.Execute(`INSERT INTO users VALUES (u1, Alice), (u2, Bob)`)
+	resp := e.Execute(`DROP TABLE users`)
+	if resp != "Table dropped" {
+		t.Fatalf("Expected 'Table dropped', got %q", resp)
+	}
+
+	resp = e.Execute(`SELECT * FROM users`)
+	if resp != "No results" {
+		t.Fatalf("Expected no results after drop, got %q", resp)
 	}
 }

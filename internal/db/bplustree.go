@@ -378,31 +378,19 @@ func (t *BPlusTree) RangeQuery(startKey, endKey string) map[string]string {
 		return results
 	}
 
-	// 1. Find the starting leaf node
 	node := t.root
+	// Find leftmost leaf
 	for !node.isLeaf {
-		i := 0
-		for i < len(node.keys) && startKey >= node.keys[i] {
-			i++
-		}
-		node = node.children[i]
+		node = node.children[0]
 	}
-
-	// 2. Iterate through leaf nodes using the 'next' pointer
 	for node != nil {
 		for i, k := range node.keys {
-			if k >= startKey {
-				if k <= endKey {
-					results[k] = node.values[i]
-				} else {
-					// Keys are sorted, so we've gone past endKey
-					return results
-				}
+			if (startKey == "" || k >= startKey) && (endKey == "" || k <= endKey) {
+				results[k] = node.values[i]
 			}
 		}
-		node = node.next // Move to the next leaf in the chain
+		node = node.next
 	}
-
 	return results
 }
 

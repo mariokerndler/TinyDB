@@ -28,53 +28,58 @@ func NewEngine(logPath string) *Engine {
 }
 
 func (e *Engine) Execute(cmd string) string {
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
-		return "Empty command"
+	stmt, err := Parse(cmd)
+	if err != nil {
+		return "Parse error: " + err.Error()
 	}
 
-	switch strings.ToUpper(parts[0]) {
-	case "SET":
-		if len(parts) != 3 {
-			return "Usage: SET key value"
+	switch s := stmt.(type) {
+	case *InsertStatement:
+		for _, kv := range s.Values {
+			e.tree.Insert(kv.Key, kv.Value)
+			e.wal.Append(kv.Key, kv.Value)
 		}
-		e.tree.Insert(parts[1], parts[2])
-		e.wal.Append(parts[1], parts[2])
 		return "OK"
 
-	case "GET":
-		if len(parts) != 2 {
-			return "Usage: GET key"
+	case *SelectStatement:
+		if s.Where == nil {
+			// No WHERE clause - scan all
+			results := e.tree.RangeQuery("", "")
+			if len(results) == 0 {
+				return "No results"
+			}
+			var sb strings.Builder
+			for k, v := range results {
+				sb.WriteString(fmt.Sprintf("%s: %s\n", k, v))
+			}
+			return strings.TrimRight(sb.String(), "\n")
+		} else {
+			// WHERE clause present - exact match for now
+			val, ok := e.tree.Get(s.Where.Value)
+			if ok {
+				return val
+			}
+			return "Key not found"
 		}
-		if val, ok := e.tree.Get(parts[1]); ok {
-			return val
-		}
-		return "Key not found"
 
-	case "DELETE":
-		if len(parts) != 2 {
-			return "Usage: DELETE key"
-		}
-		e.tree.Delete(parts[1])
-		e.wal.Delete(parts[1])
-		// Optionally, you could log deletion in the WAL (not implemented here)
+	case *DeleteStatement:
+		e.tree.Delete(s.Value)
+		e.wal.Delete(s.Value)
 		return "Deleted"
 
-	case "SCAN":
-		if len(parts) != 3 {
-			return "Usage: SCAN startKey endKey"
-		}
-		results := e.tree.RangeQuery(parts[1], parts[2])
+	case *DropStatement:
+		results := e.tree.RangeQuery("", "")
 		if len(results) == 0 {
-			return "No results"
+			return "Nothing to drop"
 		}
-		var sb strings.Builder
-		for k, v := range results {
-			sb.WriteString(fmt.Sprintf("%s: %s\n", k, v))
+
+		for k, _ := range results {
+			e.tree.Delete(k)
+			e.wal.Delete(k)
 		}
-		return strings.TrimRight(sb.String(), "\n")
+		return "Table dropped"
 
 	default:
-		return "Unknown command"
+		return "Unsupported statement type"
 	}
 }
