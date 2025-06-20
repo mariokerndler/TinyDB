@@ -22,12 +22,7 @@ func (s *InsertStatement) StmtType() string {
 // --- SELECT STATEMENT ---
 type SelectStatement struct {
 	Table string
-	Where *WhereClause
-}
-
-type WhereClause struct {
-	Key   string
-	Value string
+	Keys  []string
 }
 
 func (s *SelectStatement) StmtType() string {

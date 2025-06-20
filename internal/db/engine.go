@@ -42,24 +42,33 @@ func (e *Engine) Execute(cmd string) string {
 		return "OK"
 
 	case *SelectStatement:
-		if s.Where == nil {
-			// No WHERE clause - scan all
+		var sb strings.Builder
+		// The Where clause has been removed.
+		// Now we only distinguish between selecting specific keys or all keys.
+		if len(s.Keys) > 0 {
+			// Specific keys selected (e.g., SELECT key1, key2 FROM test)
+			foundResults := false
+			for _, key := range s.Keys {
+				val, ok := e.tree.Get(key)
+				if ok {
+					sb.WriteString(fmt.Sprintf("%s: %s\n", key, val))
+					foundResults = true
+				}
+			}
+			if !foundResults {
+				return "No results"
+			}
+			return strings.TrimRight(sb.String(), "\n")
+		} else {
+			// No specific keys (e.g., SELECT * FROM test) - scan all
 			results := e.tree.RangeQuery("", "")
 			if len(results) == 0 {
 				return "No results"
 			}
-			var sb strings.Builder
 			for k, v := range results {
 				sb.WriteString(fmt.Sprintf("%s: %s\n", k, v))
 			}
 			return strings.TrimRight(sb.String(), "\n")
-		} else {
-			// WHERE clause present - exact match for now
-			val, ok := e.tree.Get(s.Where.Value)
-			if ok {
-				return val
-			}
-			return "Key not found"
 		}
 
 	case *DeleteStatement:
@@ -73,7 +82,7 @@ func (e *Engine) Execute(cmd string) string {
 			return "Nothing to drop"
 		}
 
-		for k, _ := range results {
+		for k := range results {
 			e.tree.Delete(k)
 			e.wal.Delete(k)
 		}

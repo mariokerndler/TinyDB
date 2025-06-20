@@ -74,36 +74,62 @@ func parseInsert(tokens []string) (Statement, error) {
 }
 
 func parseSelect(tokens []string) (Statement, error) {
-	// SELECT * FROM table  -> tokens length 4
-	// SELECT * FROM table WHERE key = value  -> tokens length 8
-
-	if len(tokens) == 4 {
-		if tokens[1] != "*" || strings.ToUpper(tokens[2]) != "FROM" {
-			return nil, errors.New("expected SELECT * FROM")
+	fromIndex := -1
+	for i := 0; i < len(tokens); i++ {
+		if strings.ToUpper(tokens[i]) == "FROM" {
+			fromIndex = i
+			break
 		}
-		return &SelectStatement{
-			Table: tokens[3],
-			Where: nil, // no WHERE clause
-		}, nil
 	}
 
-	if len(tokens) == 8 {
-		if tokens[1] != "*" || strings.ToUpper(tokens[2]) != "FROM" {
-			return nil, errors.New("expected SELECT * FROM")
-		}
-		if strings.ToUpper(tokens[4]) != "WHERE" || tokens[6] != "=" {
-			return nil, errors.New("expected WHERE key = value")
-		}
-		return &SelectStatement{
-			Table: tokens[3],
-			Where: &WhereClause{
-				Key:   tokens[5],
-				Value: tokens[7],
-			},
-		}, nil
+	if fromIndex == -1 {
+		return nil, errors.New("expected FROM keyword")
+	}
+	// "SELECT" "keys_or_star" "FROM" "table" is the minimum valid structure.
+	// This means "FROM" must be at least at index 2 (e.g., SELECT * FROM).
+	if fromIndex < 2 {
+		return nil, errors.New("invalid SELECT syntax: missing columns or FROM keyword")
 	}
 
-	return nil, errors.New("invalid SELECT syntax")
+	// Check if there's a token after "FROM" for the table name
+	if fromIndex+1 >= len(tokens) {
+		return nil, errors.New("expected table name after FROM")
+	}
+	table := tokens[fromIndex+1]
+	// No need for `if table == ""` check here because `strings.Fields` ensures non-empty tokens.
+
+	// Check if there are any unexpected tokens after the table name
+	if fromIndex+2 < len(tokens) {
+		return nil, errors.New("unexpected token after table name. SELECT statement does not support WHERE clause anymore.")
+	}
+
+	var keys []string
+	// The tokens between "SELECT" (tokens[0]) and "FROM" (tokens[fromIndex]) are the selected columns
+	columnTokens := tokens[1:fromIndex]
+
+	if len(columnTokens) == 1 && columnTokens[0] == "*" {
+		// SELECT * FROM ...
+		// keys will remain empty, which signifies "all keys" in engine.go
+	} else {
+		// SELECT key1, key2 FROM ...
+		// Join the column tokens and then split by "," to handle ["key1", ",", "key2"] correctly
+		joinedKeys := strings.Join(columnTokens, "")
+		parsedKeys := strings.Split(joinedKeys, ",")
+		for _, k := range parsedKeys {
+			trimmedKey := strings.TrimSpace(k)
+			if trimmedKey != "" {
+				keys = append(keys, trimmedKey)
+			}
+		}
+		if len(keys) == 0 { // This might happen if input was just "SELECT FROM test" or similar malformed query
+			return nil, errors.New("invalid SELECT syntax: no keys specified")
+		}
+	}
+
+	return &SelectStatement{
+		Table: table,
+		Keys:  keys,
+	}, nil
 }
 
 func parseDelete(tokens []string) (Statement, error) {

@@ -1,6 +1,3 @@
 SET foo bar
 SET abc 123
 SET xyz 890
-DELETE foo
-DELETE abc
-DELETE xyz
