@@ -6,25 +6,31 @@ import (
 )
 
 type Engine struct {
-	wal  *WAL
-	tree *BPlusTree
+	wal    *WAL
+	tables map[string]*BPlusTree
 }
 
 func NewEngine(logPath string) *Engine {
 	wal := NewWAL(logPath)
-	tree := NewBPlusTree()
+	engine := &Engine{
+		wal:    wal,
+		tables: make(map[string]*BPlusTree),
+	}
 
-	// Recover data from WAL
-	entries, err := wal.Replay()
+	// Recover data for all tables from WAL
+	tablesData, err := wal.Replay()
 	if err != nil {
 		panic("Failed to replay WAL: " + err.Error())
 	}
 
-	for _, entry := range entries {
-		tree.Insert(entry[0], entry[1])
+	for tableName, entries := range tablesData {
+		tree := NewBPlusTree()
+		for _, entry := range entries {
+			tree.Insert(entry[0], entry[1])
+		}
+		engine.tables[tableName] = tree
 	}
-
-	return &Engine{wal, tree}
+	return engine
 }
 
 func (e *Engine) Execute(cmd string) string {
@@ -35,21 +41,31 @@ func (e *Engine) Execute(cmd string) string {
 
 	switch s := stmt.(type) {
 	case *InsertStatement:
+		// Get or create the table's BPlusTree
+		tree, ok := e.tables[s.Table]
+		if !ok {
+			tree = NewBPlusTree()
+			e.tables[s.Table] = tree
+		}
+
 		for _, kv := range s.Values {
-			e.tree.Insert(kv.Key, kv.Value)
-			e.wal.Append(kv.Key, kv.Value)
+			tree.Insert(kv.Key, kv.Value)
+			e.wal.Append(s.Table, kv.Key, kv.Value) // Log with table name
 		}
 		return "OK"
 
 	case *SelectStatement:
+		tree, ok := e.tables[s.Table]
+		if !ok {
+			return fmt.Sprintf("Table '%s' not found", s.Table)
+		}
+
 		var sb strings.Builder
-		// The Where clause has been removed.
-		// Now we only distinguish between selecting specific keys or all keys.
 		if len(s.Keys) > 0 {
-			// Specific keys selected (e.g., SELECT key1, key2 FROM test)
+			// Specific keys selected
 			foundResults := false
 			for _, key := range s.Keys {
-				val, ok := e.tree.Get(key)
+				val, ok := tree.Get(key)
 				if ok {
 					sb.WriteString(fmt.Sprintf("%s: %s\n", key, val))
 					foundResults = true
@@ -60,8 +76,8 @@ func (e *Engine) Execute(cmd string) string {
 			}
 			return strings.TrimRight(sb.String(), "\n")
 		} else {
-			// No specific keys (e.g., SELECT * FROM test) - scan all
-			results := e.tree.RangeQuery("", "")
+			// SELECT * - scan all
+			results := tree.RangeQuery("", "")
 			if len(results) == 0 {
 				return "No results"
 			}
@@ -72,21 +88,32 @@ func (e *Engine) Execute(cmd string) string {
 		}
 
 	case *DeleteStatement:
-		e.tree.Delete(s.Value)
-		e.wal.Delete(s.Value)
-		return "Deleted"
+		tree, ok := e.tables[s.Table]
+		if !ok {
+			return fmt.Sprintf("Table '%s' not found", s.Table)
+		}
+
+		deletedCount := 0
+		for _, key := range s.Keys {
+			if tree.Delete(key) { // BPlusTree.Delete now returns bool
+				e.wal.Delete(s.Table, key) // Log with table name
+				deletedCount++
+			}
+		}
+
+		if deletedCount > 0 {
+			return fmt.Sprintf("Deleted %d key(s) from table '%s'", deletedCount, s.Table)
+		}
+		return fmt.Sprintf("No key(s) found to delete in table '%s'", s.Table)
 
 	case *DropStatement:
-		results := e.tree.RangeQuery("", "")
-		if len(results) == 0 {
-			return "Nothing to drop"
+		_, ok := e.tables[s.Table]
+		if !ok {
+			return fmt.Sprintf("Table '%s' not found", s.Table)
 		}
-
-		for k := range results {
-			e.tree.Delete(k)
-			e.wal.Delete(k)
-		}
-		return "Table dropped"
+		delete(e.tables, s.Table) // Remove the table from the in-memory map
+		e.wal.DropTable(s.Table)  // Log the drop operation
+		return fmt.Sprintf("Table '%s' dropped", s.Table)
 
 	default:
 		return "Unsupported statement type"

@@ -177,37 +177,46 @@ func (t *BPlusTree) Get(key string) (string, bool) {
 
 // --- DELETION IMPLEMENTATION ---
 // Delete removes a key-value pair from the B+ Tree.
-func (t *BPlusTree) Delete(key string) {
-	// Root deletion is special
-	if t.root.isLeaf { // Case: Root is a leaf
-		t.root.deleteFromLeaf(key)
-		// If root becomes empty, re-initialize to avoid nil root later
-		if len(t.root.keys) == 0 {
-			t.root = NewBPlusTree().root // Creates an empty leaf root
+// It returns true if the element was successfully deleted, false otherwise.
+func (t *BPlusTree) Delete(key string) bool {
+	// Special case: Root is a leaf
+	if t.root.isLeaf {
+		deleted := t.root.deleteFromLeaf(key)
+		// If root becomes empty after deletion, re-initialize to an empty leaf root
+		if deleted && len(t.root.keys) == 0 {
+			t.root = NewBPlusTree().root
 		}
-		return
+		return deleted
 	}
 
 	// Recursive deletion starting from the root
-	underflow := t.root.delete(key, nil, 0) // Parent and child index for root are nil/0
+	// We need to pass a pointer to a boolean to track if a key was actually deleted anywhere in the subtree
+	keyDeleted := false
+	underflow := t.root.delete(key, nil, 0, &keyDeleted) // Pass keyDeleted by reference
 
 	// If the root underflows and has only one child, that child becomes the new root
 	if underflow && len(t.root.keys) == 0 {
 		if len(t.root.children) == 1 {
 			t.root = t.root.children[0]
-		} else if len(t.root.children) == 0 { // Should not happen if tree is not completely empty
+		} else if len(t.root.children) == 0 { // Should only happen if the tree becomes completely empty
 			t.root = NewBPlusTree().root // Tree became empty
 		}
 	}
+	return keyDeleted
 }
 
 // delete recursively deletes a key from the node.
 // Returns true if the node underflowed after deletion/merge.
 // parent: the parent node (needed for redistribution/merge)
 // childIndex: the index of 'n' in parent's children array
-func (n *BPlusTreeNode) delete(key string, parent *BPlusTreeNode, childIndex int) bool {
+// keyDeleted: a pointer to a boolean indicating if the key was successfully deleted at any point
+func (n *BPlusTreeNode) delete(key string, parent *BPlusTreeNode, childIndex int, keyDeleted *bool) bool {
 	if n.isLeaf {
-		return n.deleteFromLeaf(key)
+		deletedInLeaf := n.deleteFromLeaf(key)
+		if deletedInLeaf {
+			*keyDeleted = true // Mark that a key was deleted
+		}
+		return len(n.keys) < MIN_KEYS // Return true if leaf underflowed
 	}
 
 	// Internal node traversal
@@ -217,7 +226,7 @@ func (n *BPlusTreeNode) delete(key string, parent *BPlusTreeNode, childIndex int
 	}
 
 	// Recursively delete from the child
-	childUnderflow := n.children[i].delete(key, n, i)
+	childUnderflow := n.children[i].delete(key, n, i, keyDeleted)
 
 	if childUnderflow {
 		return n.handleUnderflow(i) // Handle underflow of child at index i
@@ -225,26 +234,18 @@ func (n *BPlusTreeNode) delete(key string, parent *BPlusTreeNode, childIndex int
 	return false // No underflow
 }
 
-// deleteFromLeaf removes a key from a leaf node and handles underflow.
-// Returns true if the leaf node underflowed.
+// deleteFromLeaf removes a key from a leaf node.
+// Returns true if the key was found and removed, false otherwise.
 func (n *BPlusTreeNode) deleteFromLeaf(key string) bool {
-	found := false
 	for i, k := range n.keys {
 		if k == key {
 			// Remove key and value
 			n.keys = append(n.keys[:i], n.keys[i+1:]...)
 			n.values = append(n.values[:i], n.values[i+1:]...)
-			found = true
-			break
+			return true // Key found and removed
 		}
 	}
-
-	if !found {
-		return false // Key not found, no deletion, no underflow
-	}
-
-	// Check for underflow
-	return len(n.keys) < MIN_KEYS
+	return false // Key not found
 }
 
 // handleUnderflow attempts to redistribute or merge children.
@@ -257,7 +258,7 @@ func (n *BPlusTreeNode) handleUnderflow(childIndex int) bool {
 	if childIndex > 0 {
 		leftSibling := n.children[childIndex-1]
 		if len(leftSibling.keys) > MIN_KEYS {
-			n.redistribute(leftSibling, underflowingChild, childIndex-1, childIndex)
+			n.redistributeFromLeft(leftSibling, underflowingChild, childIndex-1)
 			return false // Redistribution successful, no underflow
 		}
 	}
@@ -266,7 +267,7 @@ func (n *BPlusTreeNode) handleUnderflow(childIndex int) bool {
 	if childIndex < len(n.children)-1 {
 		rightSibling := n.children[childIndex+1]
 		if len(rightSibling.keys) > MIN_KEYS {
-			n.redistribute(underflowingChild, rightSibling, childIndex, childIndex+1)
+			n.redistributeFromRight(underflowingChild, rightSibling, childIndex)
 			return false // Redistribution successful, no underflow
 		}
 	}
@@ -282,68 +283,67 @@ func (n *BPlusTreeNode) handleUnderflow(childIndex int) bool {
 	return len(n.keys) < MIN_KEYS
 }
 
-// redistribute borrows a key/value/child between two siblings.
-// sibling1: the node donating (either left or right sibling)
-// sibling2: the node receiving (the underflowing node)
-// separatorIndex1: the index of the separator key in parent that separates sibling1 and sibling2
-// separatorIndex2: the index of the separator key in parent that separates sibling2 and sibling3 (if applicable)
-func (n *BPlusTreeNode) redistribute(sibling1, sibling2 *BPlusTreeNode, separatorIndex, childIndexToUpdate int) {
-	if len(sibling1.keys) == 0 || len(sibling2.keys) == 0 {
-		// Should never redistribute from/to empty siblings
-		return
-	}
+// redistributeFromLeft borrows a key/value/child from the leftSibling to the underflowingChild.
+// leftSibling: the donor (left sibling)
+// underflowingChild: the receiver (underflowing child)
+// separatorIndex: the index of the separator key in parent that separates leftSibling and underflowingChild
+func (n *BPlusTreeNode) redistributeFromLeft(leftSibling, underflowingChild *BPlusTreeNode, separatorIndex int) {
+	if underflowingChild.isLeaf {
+		// Move last key/value from leftSibling to underflowingChild
+		keyToMove := leftSibling.keys[len(leftSibling.keys)-1]
+		valueToMove := leftSibling.values[len(leftSibling.values)-1]
+		leftSibling.keys = leftSibling.keys[:len(leftSibling.keys)-1]
+		leftSibling.values = leftSibling.values[:len(leftSibling.values)-1]
 
-	if sibling2.isLeaf {
-		if sibling1.keys[0] < sibling2.keys[0] { // sibling1 is left sibling
-			keyToMove := sibling1.keys[len(sibling1.keys)-1]
-			valueToMove := sibling1.values[len(sibling1.values)-1]
-			sibling1.keys = sibling1.keys[:len(sibling1.keys)-1]
-			sibling1.values = sibling1.values[:len(sibling1.values)-1]
+		underflowingChild.keys = append([]string{keyToMove}, underflowingChild.keys...)
+		underflowingChild.values = append([]string{valueToMove}, underflowingChild.values...)
 
-			sibling2.keys = append([]string{keyToMove}, sibling2.keys...)
-			sibling2.values = append([]string{valueToMove}, sibling2.values...)
-
-			// Update parent's separator key
-			n.keys[separatorIndex] = sibling2.keys[0] // Separator becomes the new first key of sibling2
-		} else { // sibling1 is right sibling
-			// Take first key/value from rightSibling, add to end of underflowingChild
-			keyToMove := sibling1.keys[0]
-			valueToMove := sibling1.values[0]
-			sibling1.keys = sibling1.keys[1:]
-			sibling1.values = sibling1.values[1:]
-
-			sibling2.keys = append(sibling2.keys, keyToMove)
-			sibling2.values = append(sibling2.values, valueToMove)
-
-			// Update parent's separator key
-			n.keys[separatorIndex] = sibling1.keys[0] // Separator becomes the new first key of sibling1
-		}
+		// Update parent's separator key: it should be the new first key of the now-augmented underflowingChild
+		n.keys[separatorIndex] = underflowingChild.keys[0]
 	} else { // Internal node redistribution
-		if sibling1.keys[0] < sibling2.keys[0] { // sibling1 is left sibling
-			// Pull down parent's separator key
-			promotedKey := n.keys[separatorIndex]
-			n.keys[separatorIndex] = sibling1.keys[len(sibling1.keys)-1] // Replace with last key from left sibling
-			sibling1.keys = sibling1.keys[:len(sibling1.keys)-1]
+		// Pull down parent's separator key
+		promotedKey := n.keys[separatorIndex]
+		n.keys[separatorIndex] = leftSibling.keys[len(leftSibling.keys)-1] // Replace with last key from left sibling
+		leftSibling.keys = leftSibling.keys[:len(leftSibling.keys)-1]
 
-			// Move key and last child from left sibling to underflowing child
-			childToMove := sibling1.children[len(sibling1.children)-1]
-			sibling1.children = sibling1.children[:len(sibling1.children)-1]
+		// Move key and last child from left sibling to underflowing child
+		childToMove := leftSibling.children[len(leftSibling.children)-1]
+		leftSibling.children = leftSibling.children[:len(leftSibling.children)-1]
 
-			sibling2.keys = append([]string{promotedKey}, sibling2.keys...)
-			sibling2.children = append([]*BPlusTreeNode{childToMove}, sibling2.children...)
-		} else { // sibling1 is right sibling
-			// Pull down parent's separator key
-			promotedKey := n.keys[separatorIndex]     // Separator between 'underflowingChild' and 'rightSibling'
-			n.keys[separatorIndex] = sibling1.keys[0] // Replace with first key from right sibling
-			sibling1.keys = sibling1.keys[1:]
+		underflowingChild.keys = append([]string{promotedKey}, underflowingChild.keys...)
+		underflowingChild.children = append([]*BPlusTreeNode{childToMove}, underflowingChild.children...)
+	}
+}
 
-			// Move key and first child from right sibling to underflowing child
-			childToMove := sibling1.children[0]
-			sibling1.children = sibling1.children[1:]
+// redistributeFromRight borrows a key/value/child from the rightSibling to the underflowingChild.
+// underflowingChild: the receiver (underflowing child)
+// rightSibling: the donor (right sibling)
+// separatorIndex: the index of the separator key in parent that separates underflowingChild and rightSibling
+func (n *BPlusTreeNode) redistributeFromRight(underflowingChild, rightSibling *BPlusTreeNode, separatorIndex int) {
+	if underflowingChild.isLeaf {
+		// Take first key/value from rightSibling, add to end of underflowingChild
+		keyToMove := rightSibling.keys[0]
+		valueToMove := rightSibling.values[0]
+		rightSibling.keys = rightSibling.keys[1:]
+		rightSibling.values = rightSibling.values[1:]
 
-			sibling2.keys = append(sibling2.keys, promotedKey)
-			sibling2.children = append(sibling2.children, childToMove)
-		}
+		underflowingChild.keys = append(underflowingChild.keys, keyToMove)
+		underflowingChild.values = append(underflowingChild.values, valueToMove)
+
+		// Update parent's separator key: it should be the new first key of the (now-reduced) rightSibling
+		n.keys[separatorIndex] = rightSibling.keys[0]
+	} else { // Internal node redistribution
+		// Pull down parent's separator key
+		promotedKey := n.keys[separatorIndex]
+		n.keys[separatorIndex] = rightSibling.keys[0] // Replace with first key from right sibling
+		rightSibling.keys = rightSibling.keys[1:]
+
+		// Move key and first child from right sibling to underflowing child
+		childToMove := rightSibling.children[0]
+		rightSibling.children = rightSibling.children[1:]
+
+		underflowingChild.keys = append(underflowingChild.keys, promotedKey)
+		underflowingChild.children = append(underflowingChild.children, childToMove)
 	}
 }
 
@@ -355,9 +355,9 @@ func (n *BPlusTreeNode) merge(sibling1, sibling2 *BPlusTreeNode, separatorIndex 
 	if sibling1.isLeaf {
 		sibling1.keys = append(sibling1.keys, sibling2.keys...)
 		sibling1.values = append(sibling1.values, sibling2.values...)
-		sibling1.next = sibling2.next // Update leaf chaining
+		sibling1.next = sibling2.next // Crucial: Update leaf chaining
 	} else { // Internal node merge
-		// Pull down the seperator key from the parent
+		// Pull down the separator key from the parent
 		promotedKey := n.keys[separatorIndex]
 		sibling1.keys = append(sibling1.keys, promotedKey) // Key from parent goes into sibling1
 		sibling1.keys = append(sibling1.keys, sibling2.keys...)

@@ -32,8 +32,7 @@ func (s *SelectStatement) StmtType() string {
 // --- DELETE STATEMENT ---
 type DeleteStatement struct {
 	Table string
-	Key   string
-	Value string
+	Keys  []string
 }
 
 func (s *DeleteStatement) StmtType() string {

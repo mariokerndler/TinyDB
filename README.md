@@ -9,13 +9,13 @@ Used to insert key-value pairs into a specified table.
 
 **Syntax:**
 ```
-INSERT INTO <table_name> VALUES (<key1>, <value1>), (<key2>, <value2>), ...
+INSERT (<key1>, <value1>), (<key2>, <value2>), ... INTO <table_name>
 ```
 
 **Examples:**
 ```
-INSERT INTO users VALUES (id1, Alice), (id2, Bob)
-INSERT INTO products VALUES (prod_a, Laptop), (prod_b, Mouse)
+INSERT (id1, Alice), (id2, Bob) INTO users 
+INSERT (prod_a, Laptop), (prod_b, Mouse) INTO products 
 ```
 
 ### 2. SELECT Statement
@@ -43,12 +43,12 @@ Used to delete a specific key-value pair from a table based on a WHERE clause.
 
 **Syntax:**
 ```
-DELETE FROM <table_name> WHERE <key> = <value>
+DELETE <key1>[, <key2>, ...] FROM <table_name>
 ```
 **Examples:**
 ```
-DELETE FROM users WHERE id = id1
-DELETE FROM products WHERE name = Laptop
+DELETE id FROM users
+DELETE name FROM products
 ```
 
 ### 4. DROP Statement
@@ -56,11 +56,11 @@ Used to "drop" (clear) all data from a specified table. In this simple implement
 
 **Syntax:**
 ```
-DROP TABLE <table_name>
+DROP <table_name>
 ```
 
 **Examples:**
 ```
-DROP TABLE users
-DROP TABLE products
+DROP users
+DROP products
 ```
