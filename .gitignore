@@ -37,3 +37,4 @@ go.work.sum
 # Other Files
 TinySQL
 *.log
+data.log

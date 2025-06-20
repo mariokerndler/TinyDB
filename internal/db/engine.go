@@ -1,54 +1,121 @@
 package db
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type Engine struct {
-	wal  *WAL
-	tree *BPlusTree
+	wal    *WAL
+	tables map[string]*BPlusTree
 }
 
 func NewEngine(logPath string) *Engine {
 	wal := NewWAL(logPath)
-	tree := NewBPlusTree()
+	engine := &Engine{
+		wal:    wal,
+		tables: make(map[string]*BPlusTree),
+	}
 
-	// Recover data from WAL
-	entries, err := wal.Replay()
+	// Recover data for all tables from WAL
+	tablesData, err := wal.Replay()
 	if err != nil {
 		panic("Failed to replay WAL: " + err.Error())
 	}
 
-	for _, entry := range entries {
-		tree.Insert(entry[0], entry[1])
+	for tableName, entries := range tablesData {
+		tree := NewBPlusTree()
+		for _, entry := range entries {
+			tree.Insert(entry[0], entry[1])
+		}
+		engine.tables[tableName] = tree
 	}
-
-	return &Engine{wal, tree}
+	return engine
 }
 
 func (e *Engine) Execute(cmd string) string {
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
-		return "Empty command"
+	stmt, err := Parse(cmd)
+	if err != nil {
+		return "Parse error: " + err.Error()
 	}
 
-	switch strings.ToUpper(parts[0]) {
-	case "SET":
-		if len(parts) != 3 {
-			return "Usage: SET key value"
+	switch s := stmt.(type) {
+	case *InsertStatement:
+		// Get or create the table's BPlusTree
+		tree, ok := e.tables[s.Table]
+		if !ok {
+			tree = NewBPlusTree()
+			e.tables[s.Table] = tree
 		}
-		e.tree.Insert(parts[1], parts[2])
-		e.wal.Append(parts[1], parts[2])
+
+		for _, kv := range s.Values {
+			tree.Insert(kv.Key, kv.Value)
+			e.wal.Append(s.Table, kv.Key, kv.Value) // Log with table name
+		}
 		return "OK"
 
-	case "GET":
-		if len(parts) != 2 {
-			return "Usage: GET key"
+	case *SelectStatement:
+		tree, ok := e.tables[s.Table]
+		if !ok {
+			return fmt.Sprintf("Table '%s' not found", s.Table)
 		}
-		if val, ok := e.tree.Get(parts[1]); ok {
-			return val
+
+		var sb strings.Builder
+		if len(s.Keys) > 0 {
+			// Specific keys selected
+			foundResults := false
+			for _, key := range s.Keys {
+				val, ok := tree.Get(key)
+				if ok {
+					sb.WriteString(fmt.Sprintf("%s: %s\n", key, val))
+					foundResults = true
+				}
+			}
+			if !foundResults {
+				return "No results"
+			}
+			return strings.TrimRight(sb.String(), "\n")
+		} else {
+			// SELECT * - scan all
+			results := tree.RangeQuery("", "")
+			if len(results) == 0 {
+				return "No results"
+			}
+			for k, v := range results {
+				sb.WriteString(fmt.Sprintf("%s: %s\n", k, v))
+			}
+			return strings.TrimRight(sb.String(), "\n")
 		}
-		return "Key not found"
+
+	case *DeleteStatement:
+		tree, ok := e.tables[s.Table]
+		if !ok {
+			return fmt.Sprintf("Table '%s' not found", s.Table)
+		}
+
+		deletedCount := 0
+		for _, key := range s.Keys {
+			if tree.Delete(key) { // BPlusTree.Delete now returns bool
+				e.wal.Delete(s.Table, key) // Log with table name
+				deletedCount++
+			}
+		}
+
+		if deletedCount > 0 {
+			return fmt.Sprintf("Deleted %d key(s) from table '%s'", deletedCount, s.Table)
+		}
+		return fmt.Sprintf("No key(s) found to delete in table '%s'", s.Table)
+
+	case *DropStatement:
+		_, ok := e.tables[s.Table]
+		if !ok {
+			return fmt.Sprintf("Table '%s' not found", s.Table)
+		}
+		delete(e.tables, s.Table) // Remove the table from the in-memory map
+		e.wal.DropTable(s.Table)  // Log the drop operation
+		return fmt.Sprintf("Table '%s' dropped", s.Table)
 
 	default:
-		return "Unknown command"
+		return "Unsupported statement type"
 	}
 }
