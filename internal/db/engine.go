@@ -48,11 +48,35 @@ func (e *Engine) Execute(cmd string) string {
 			e.tables[s.Table] = tree
 		}
 
+		insertedCount := 0
 		for _, kv := range s.Values {
-			tree.Insert(kv.Key, kv.Value)
-			e.wal.Append(s.Table, kv.Key, kv.Value) // Log with table name
+			if tree.Insert(kv.Key, kv.Value) { // Insert only if key is new
+				e.wal.Append(s.Table, kv.Key, kv.Value) // Log with table name
+				insertedCount++
+			}
 		}
-		return "OK"
+		if insertedCount > 0 {
+			return fmt.Sprintf("Inserted %d key(s) into table '%s'", insertedCount, s.Table)
+		}
+		return "No new keys inserted (they might already exist)"
+
+	case *UpdateStatement: // New case for UPDATE
+		tree, ok := e.tables[s.Table]
+		if !ok {
+			return fmt.Sprintf("Table '%s' not found", s.Table)
+		}
+
+		updatedCount := 0
+		for _, kv := range s.Values {
+			if tree.Update(kv.Key, kv.Value) { // Update only if key exists
+				e.wal.Append(s.Table, kv.Key, kv.Value) // Log the update as a SET operation
+				updatedCount++
+			}
+		}
+		if updatedCount > 0 {
+			return fmt.Sprintf("Updated %d key(s) in table '%s'", updatedCount, s.Table)
+		}
+		return "No keys found to update"
 
 	case *SelectStatement:
 		tree, ok := e.tables[s.Table]

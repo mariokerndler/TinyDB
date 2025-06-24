@@ -47,3 +47,13 @@ type DropStatement struct {
 func (s *DropStatement) StmtType() string {
 	return "DROP"
 }
+
+// --- UPDATE STATEMENT ---
+type UpdateStatement struct {
+	Table  string
+	Values []KeyValue
+}
+
+func (s *UpdateStatement) StmtType() string {
+	return "UPDATE"
+}

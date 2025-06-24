@@ -32,11 +32,21 @@ func TestInsertAndGet(t *testing.T) {
 func TestUpdateValue(t *testing.T) {
 	tree := NewBPlusTree()
 	tree.Insert("a", "apple")
-	tree.Insert("a", "apricot") // update value
+
+	// Use the new Update method for updating values
+	tree.Update("a", "apricot") // update value
 
 	val, ok := tree.Get("a")
 	if !ok || val != "apricot" {
 		t.Errorf("Expected updated value 'apricot', got %q", val)
+	}
+
+	// Test updating a non-existent key (should return false and not change anything)
+	if tree.Update("z", "zebra") {
+		t.Errorf("Expected Update to return false for non-existent key, got true")
+	}
+	if _, ok := tree.Get("z"); ok {
+		t.Errorf("Expected key 'z' not to be inserted by Update")
 	}
 }
 

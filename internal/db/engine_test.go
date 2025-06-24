@@ -28,8 +28,9 @@ func TestEngineInsertAndSelectAll(t *testing.T) {
 	// Test basic insert into a new table
 	insertCmd := `INSERT (a, 1), (b, 2), (c, 3) INTO mytable`
 	resp := e.Execute(insertCmd)
-	if resp != "OK" {
-		t.Fatalf("Expected OK for insert, got %q", resp)
+	// Updated expected response for INSERT
+	if resp != "Inserted 3 key(s) into table 'mytable'" {
+		t.Fatalf("Expected 'Inserted 3 key(s) into table 'mytable'' for insert, got %q", resp)
 	}
 
 	// Test selecting all from the table
@@ -54,8 +55,9 @@ func TestEngineSelectSpecificKeys(t *testing.T) {
 	// Insert data into a test table
 	insertCmd := `INSERT (key1, value1), (key2, value2), (key3, value3) INTO another_table`
 	resp := e.Execute(insertCmd)
-	if resp != "OK" {
-		t.Fatalf("Expected OK for insert, got %q", resp)
+	// Updated expected response for INSERT
+	if resp != "Inserted 3 key(s) into table 'another_table'" {
+		t.Fatalf("Expected 'Inserted 3 key(s) into table 'another_table'' for insert, got %q", resp)
 	}
 
 	// Test selecting a single key
@@ -254,13 +256,100 @@ func TestEngineInvalidSyntax(t *testing.T) {
 	if !strings.HasPrefix(resp, "Parse error:") {
 		t.Fatalf("Expected parse error for invalid DROP, got %q", resp)
 	}
+
+	// Test invalid UPDATE syntax
+	resp = e.Execute(`UPDATE mytable SET`) // Missing key-value pairs
+	if !strings.HasPrefix(resp, "Parse error:") {
+		t.Fatalf("Expected parse error for invalid UPDATE, got %q", resp)
+	}
+	resp = e.Execute(`UPDATE mytable (k,v)`) // Missing SET keyword
+	if !strings.HasPrefix(resp, "Parse error:") {
+		t.Fatalf("Expected parse error for invalid UPDATE, got %q", resp)
+	}
 }
 
 func TestEngineUnsupportedStatement(t *testing.T) {
 	e := setupTestEngine(t)
 
-	resp := e.Execute(`UPDATE table SET key = val`) // not supported
+	// This test is no longer relevant as UPDATE is now supported and tested separately
+	// It's kept here just to confirm any other unknown commands still result in a parse error.
+	resp := e.Execute(`UNKNOWN COMMAND`)
 	if !strings.HasPrefix(resp, "Parse error:") {
-		t.Fatalf("Expected parse error, got %q", resp)
+		t.Fatalf("Expected parse error for unknown command, got %q", resp)
+	}
+}
+
+func TestEngineUpdateCommand(t *testing.T) {
+	e := setupTestEngine(t)
+
+	// Insert initial data
+	e.Execute(`INSERT (k1, v1), (k2, v2) INTO update_table`)
+
+	// Test successful update
+	resp := e.Execute(`UPDATE update_table SET (k1, v1_updated), (k3, v3_new_not_exist)`) // k3 does not exist, should not update
+	if resp != "Updated 1 key(s) in table 'update_table'" {
+		t.Fatalf("Expected 'Updated 1 key(s) in table 'update_table'', got %q", resp)
+	}
+
+	// Verify updated value
+	resp = e.Execute(`SELECT k1 FROM update_table`)
+	if strings.TrimSpace(resp) != "k1: v1_updated" {
+		t.Fatalf("Expected k1: v1_updated, got %q", resp)
+	}
+
+	// Verify non-updated key (k2 should remain original)
+	resp = e.Execute(`SELECT k2 FROM update_table`)
+	if strings.TrimSpace(resp) != "k2: v2" {
+		t.Fatalf("Expected k2: v2, got %q", resp)
+	}
+
+	// Verify k3 was not inserted by UPDATE
+	resp = e.Execute(`SELECT k3 FROM update_table`)
+	if resp != "No results" {
+		t.Fatalf("Expected 'No results' for k3, got %q", resp)
+	}
+
+	// Test updating a non-existent table
+	resp = e.Execute(`UPDATE non_existent_table SET (k1, v1)`)
+	if resp != "Table 'non_existent_table' not found" {
+		t.Fatalf("Expected 'Table not found' error, got %q", resp)
+	}
+
+	// Test updating keys that don't exist in an existing table
+	e.Execute(`INSERT (key_a, val_a) INTO existing_table`)
+	resp = e.Execute(`UPDATE existing_table SET (key_b, val_b)`)
+	if resp != "No keys found to update" {
+		t.Fatalf("Expected 'No keys found to update', got %q", resp)
+	}
+}
+
+func TestEngineInsertOnlyNewKeys(t *testing.T) {
+	e := setupTestEngine(t)
+
+	// Insert initial data
+	e.Execute(`INSERT (key_x, val_x), (key_y, val_y) INTO insert_only_table`)
+
+	// Attempt to insert an existing key and a new key
+	resp := e.Execute(`INSERT (key_x, val_x_new), (key_z, val_z) INTO insert_only_table`)
+	if resp != "Inserted 1 key(s) into table 'insert_only_table'" { // Only key_z should be inserted
+		t.Fatalf("Expected 'Inserted 1 key(s) into table 'insert_only_table'', got %q", resp)
+	}
+
+	// Verify key_x value is still the original one (not updated by INSERT)
+	resp = e.Execute(`SELECT key_x FROM insert_only_table`)
+	if strings.TrimSpace(resp) != "key_x: val_x" {
+		t.Fatalf("Expected key_x: val_x, got %q", resp)
+	}
+
+	// Verify new key_z was inserted
+	resp = e.Execute(`SELECT key_z FROM insert_only_table`)
+	if strings.TrimSpace(resp) != "key_z: val_z" {
+		t.Fatalf("Expected key_z: val_z, got %q", resp)
+	}
+
+	// Attempt to insert only existing keys
+	resp = e.Execute(`INSERT (key_x, val_x_again), (key_y, val_y_again) INTO insert_only_table`)
+	if resp != "No new keys inserted (they might already exist)" {
+		t.Fatalf("Expected 'No new keys inserted (they might already exist)', got %q", resp)
 	}
 }
