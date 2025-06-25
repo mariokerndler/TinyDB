@@ -57,3 +57,18 @@ type UpdateStatement struct {
 func (s *UpdateStatement) StmtType() string {
 	return "UPDATE"
 }
+
+// --- BEGIN STATEMENT ---
+type BeginStatement struct{}
+
+func (s *BeginStatement) StmtType() string { return "BEGIN" }
+
+// --- COMMIT STATEMENT ---
+type CommitStatement struct{}
+
+func (s *CommitStatement) StmtType() string { return "COMMIT" }
+
+// --- ROLLBACK STATEMENT ---
+type RollbackStatement struct{}
+
+func (s *RollbackStatement) StmtType() string { return "ROLLBACK" }

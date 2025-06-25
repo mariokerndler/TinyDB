@@ -27,6 +27,12 @@ func Parse(input string) (Statement, error) {
 		return parseDrop(tokens)
 	case "UPDATE":
 		return parseUpdate(tokens)
+	case "BEGIN":
+		return parseBegin(tokens)
+	case "COMMIT":
+		return parseCommit(tokens)
+	case "ROLLBACK":
+		return parseRollback(tokens)
 	default:
 		return nil, fmt.Errorf("unsupported statement: %s", tokens[0])
 	}
@@ -283,4 +289,25 @@ func parseUpdate(tokens []string) (Statement, error) {
 		Table:  table,
 		Values: values,
 	}, nil
+}
+
+func parseBegin(tokens []string) (Statement, error) {
+	if len(tokens) != 1 || strings.ToUpper(tokens[0]) != "BEGIN" {
+		return nil, errors.New("invalid BEGIN syntax: expected 'BEGIN'")
+	}
+	return &BeginStatement{}, nil
+}
+
+func parseCommit(tokens []string) (Statement, error) {
+	if len(tokens) != 1 || strings.ToUpper(tokens[0]) != "COMMIT" {
+		return nil, errors.New("invalid COMMIT syntax: expected 'COMMIT'")
+	}
+	return &CommitStatement{}, nil
+}
+
+func parseRollback(tokens []string) (Statement, error) {
+	if len(tokens) != 1 || strings.ToUpper(tokens[0]) != "ROLLBACK" {
+		return nil, errors.New("invalid ROLLBACK syntax: expected 'ROLLBACK'")
+	}
+	return &RollbackStatement{}, nil
 }
