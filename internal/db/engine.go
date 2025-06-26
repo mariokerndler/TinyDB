@@ -87,7 +87,11 @@ func (e *Engine) Execute(cmd string) string {
 				e.tables[tableName] = tree
 			}
 			for key, value := range kvs {
-				tree.Insert(key, value)
+				if _, exists := tree.Get(key); exists {
+					tree.Update(key, value)
+				} else {
+					tree.Insert(key, value)
+				}
 				e.wal.Append(txIDToCommit, tableName, key, value) // Updated WAL call
 			}
 		}
@@ -144,9 +148,12 @@ func (e *Engine) executeAutocommit(stmt Statement) string {
 		}
 		insertedCount := 0
 		for _, kv := range s.Values {
-			tree.Insert(kv.Key, kv.Value)
-			e.wal.Append("", s.Table, kv.Key, kv.Value) // Updated WAL call (empty txID)
-			insertedCount++
+			didInsert := tree.Insert(kv.Key, kv.Value)
+			if didInsert {
+				e.wal.Append("", s.Table, kv.Key, kv.Value) // Updated WAL call (empty txID)
+				insertedCount++
+			}
+
 		}
 		if insertedCount == 0 && len(s.Values) > 0 {
 			return "No new keys inserted (they might already exist)"
@@ -285,13 +292,17 @@ func (e *Engine) executeInTransaction(stmt Statement) string {
 			return fmt.Sprintf("Table '%s' dropped within this transaction", s.Table)
 		}
 
-		tree, ok := e.tables[s.Table]
-		combinedData := make(map[string]string)
+		type combinedEntry struct {
+			Value  string
+			FromTx bool
+		}
+		combinedData := make(map[string]combinedEntry)
 
+		tree, ok := e.tables[s.Table]
 		if ok {
 			allKeysValues := tree.RangeQuery("", "")
 			for k, v := range allKeysValues {
-				combinedData[k] = v
+				combinedData[k] = combinedEntry{Value: v, FromTx: false}
 			}
 		}
 
@@ -303,7 +314,7 @@ func (e *Engine) executeInTransaction(stmt Statement) string {
 
 		if txKVs, ok := e.txChanges[s.Table]; ok {
 			for k, v := range txKVs {
-				combinedData[k] = v
+				combinedData[k] = combinedEntry{Value: v, FromTx: true}
 			}
 		}
 
@@ -311,8 +322,12 @@ func (e *Engine) executeInTransaction(stmt Statement) string {
 		if len(s.Keys) > 0 {
 			foundResults := false
 			for _, key := range s.Keys {
-				if val, ok := combinedData[key]; ok {
-					sb.WriteString(fmt.Sprintf("%s: %s\n", key, val))
+				if entry, ok := combinedData[key]; ok {
+					if entry.FromTx {
+						sb.WriteString(fmt.Sprintf("%s: [%s] %s\n", key, e.currentTxID, entry.Value))
+					} else {
+						sb.WriteString(fmt.Sprintf("%s: %s\n", key, entry.Value))
+					}
 					foundResults = true
 				}
 			}
@@ -331,7 +346,12 @@ func (e *Engine) executeInTransaction(stmt Statement) string {
 			sort.Strings(keys)
 
 			for _, k := range keys {
-				sb.WriteString(fmt.Sprintf("%s: %s\n", k, combinedData[k]))
+				entry := combinedData[k]
+				if entry.FromTx {
+					sb.WriteString(fmt.Sprintf("%s: [%s] %s\n", k, e.currentTxID, entry.Value))
+				} else {
+					sb.WriteString(fmt.Sprintf("%s: %s\n", k, entry.Value))
+				}
 			}
 			return strings.TrimRight(sb.String(), "\n")
 		}
