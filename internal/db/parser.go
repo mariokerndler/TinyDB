@@ -33,6 +33,8 @@ func Parse(input string) (Statement, error) {
 		return parseCommit(tokens)
 	case "ROLLBACK":
 		return parseRollback(tokens)
+	case "SHOW":
+		return parseShow(tokens)
 	default:
 		return nil, fmt.Errorf("unsupported statement: %s", tokens[0])
 	}
@@ -310,4 +312,11 @@ func parseRollback(tokens []string) (Statement, error) {
 		return nil, errors.New("invalid ROLLBACK syntax: expected 'ROLLBACK'")
 	}
 	return &RollbackStatement{}, nil
+}
+
+func parseShow(tokens []string) (Statement, error) {
+	if len(tokens) == 2 && strings.ToUpper(tokens[0]) == "SHOW" && strings.ToUpper(tokens[1]) == "TABLES" {
+		return &ShowTablesStatement{}, nil
+	}
+	return nil, errors.New("invalid SHOW syntax: expected 'SHOW TABLES'")
 }

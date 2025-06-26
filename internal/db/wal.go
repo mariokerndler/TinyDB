@@ -145,9 +145,20 @@ func (w *WAL) Replay() (map[string][][2]string, error) {
 		case "COMMIT_TX":
 			if len(parts) == 2 { // COMMIT_TX <txID>
 				txID := parts[1]
+
+				// Process drops first. This clears the slate for subsequent inserts/updates if the table is re-created.
+				if drops, ok := activeTxDroppedTables[txID]; ok {
+					for tableName := range drops {
+						delete(tablesData, tableName)
+					}
+					delete(activeTxDroppedTables, txID)
+				}
+
 				// Apply buffered changes for this transaction to tablesData
 				if changes, ok := activeTxChanges[txID]; ok {
 					for tableName, kvs := range changes {
+						// If the table was dropped and then re-created in this transaction,
+						// or if it's a completely new table, ensure its map exists.
 						if _, ok := tablesData[tableName]; !ok {
 							tablesData[tableName] = make(map[string]string)
 						}
@@ -157,6 +168,8 @@ func (w *WAL) Replay() (map[string][][2]string, error) {
 					}
 					delete(activeTxChanges, txID)
 				}
+
+				// Process deletes after changes, as a delete could be for a key inserted/updated in the same tx
 				if deletes, ok := activeTxDeletes[txID]; ok {
 					for tableName, keys := range deletes {
 						if _, ok := tablesData[tableName]; ok {
@@ -167,12 +180,7 @@ func (w *WAL) Replay() (map[string][][2]string, error) {
 					}
 					delete(activeTxDeletes, txID)
 				}
-				if drops, ok := activeTxDroppedTables[txID]; ok {
-					for tableName := range drops {
-						delete(tablesData, tableName)
-					}
-					delete(activeTxDroppedTables, txID)
-				}
+
 			}
 		case "ROLLBACK_TX":
 			if len(parts) == 2 { // ROLLBACK_TX <txID>

@@ -72,3 +72,8 @@ func (s *CommitStatement) StmtType() string { return "COMMIT" }
 type RollbackStatement struct{}
 
 func (s *RollbackStatement) StmtType() string { return "ROLLBACK" }
+
+// --- SHOW TABLES STATEMENT ---
+type ShowTablesStatement struct{}
+
+func (s *ShowTablesStatement) StmtType() string { return "SHOW TABLES" }

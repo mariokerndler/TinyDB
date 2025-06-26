@@ -370,3 +370,94 @@ func TestEngineInsertOnlyNewKeys(t *testing.T) {
 		t.Fatalf("Expected key_z: val_z, got %q", resp)
 	}
 }
+
+func TestEngineShowTables(t *testing.T) {
+	e := setupTestEngine(t)
+
+	// Scenario 1: No tables initially
+	resp := e.Execute(`SHOW TABLES`)
+	if resp != "No tables found." {
+		t.Errorf("Expected 'No tables found.', got %q", resp)
+	}
+
+	// Scenario 2: Tables in autocommit mode
+	e.Execute(`INSERT (a,1) INTO table1`)
+	e.Execute(`INSERT (b,2) INTO table2`)
+	resp = e.Execute(`SHOW TABLES`)
+	expected := "Tables:\n- table1\n- table2"
+	if strings.TrimSpace(resp) != expected {
+		t.Errorf("Expected autocommit tables:\n%q\nGot:\n%q", expected, resp)
+	}
+
+	// Scenario 3: New table created in a transaction
+	txResp := e.Execute(`BEGIN`)
+	txID := strings.TrimPrefix(txResp, "Transaction started: ")
+	e.Execute(`INSERT (c,3) INTO tx_table_new`)
+	resp = e.Execute(`SHOW TABLES`)
+	expected = fmt.Sprintf("Tables:\n- table1\n- table2\n- [%s] tx_table_new", strings.TrimPrefix(txID, "tx_"))
+	if strings.TrimSpace(resp) != expected {
+		t.Errorf("Expected tables with new transactional table:\n%q\nGot:\n%q", expected, resp)
+	}
+
+	// Scenario 4: Existing table updated in a transaction
+	e.Execute(`UPDATE table1 SET (a, 100)`) // Update an existing table
+	resp = e.Execute(`SHOW TABLES`)
+	// table1 should still be listed without prefix as its update is still buffered, not a new table.
+	expected = fmt.Sprintf("Tables:\n- [%s] table1\n- table2\n- [%s] tx_table_new", strings.TrimPrefix(txID, "tx_"), strings.TrimPrefix(txID, "tx_"))
+	if strings.TrimSpace(resp) != expected {
+		t.Errorf("Expected tables with updated existing table:\n%q\nGot:\n%q", expected, resp)
+	}
+
+	// Scenario 5: Existing table deleted in a transaction (should not show)
+	e.Execute(`DELETE a FROM table1`) // Delete an existing key in table1
+	resp = e.Execute(`SHOW TABLES`)
+	// table1 should still be listed as it's not dropped, only a key deleted.
+	if strings.TrimSpace(resp) != expected {
+		t.Errorf("Expected tables with key deleted from existing table:\n%q\nGot:\n%q", expected, resp)
+	}
+
+	// Scenario 6: Table dropped in a transaction (should not show)
+	e.Execute(`DROP table2`)
+	resp = e.Execute(`SHOW TABLES`)
+	expected = fmt.Sprintf("Tables:\n- [%s] table1\n- [%s] tx_table_new", strings.TrimPrefix(txID, "tx_"), strings.TrimPrefix(txID, "tx_"))
+	if strings.TrimSpace(resp) != expected {
+		t.Errorf("Expected tables with dropped table in transaction:\n%q\nGot:\n%q", expected, resp)
+	}
+
+	// Scenario 7: Commit transaction
+	e.Execute(`COMMIT`)
+	resp = e.Execute(`SHOW TABLES`)
+	expected = "Tables:\n- table1\n- tx_table_new" // tx_table_new is now permanent, no prefix
+	if strings.TrimSpace(resp) != expected {
+		t.Errorf("Expected tables after commit:\n%q\nGot:\n%q", expected, resp)
+	}
+
+	// Scenario 8: Rollback transaction (start new transaction for this)
+	e.Execute(`INSERT (x,y) INTO perm_table`) // Create another permanent table
+	txResp = e.Execute(`BEGIN`)
+	txIDRollback := strings.TrimPrefix(txResp, "Transaction started: ")
+	e.Execute(`INSERT (d,4) INTO rollback_table`)
+	e.Execute(`DROP tx_table_new`) // Drop a previously committed table
+	resp = e.Execute(`SHOW TABLES`)
+	expected = fmt.Sprintf("Tables:\n- perm_table\n- [%s] rollback_table\n- table1", strings.TrimPrefix(txIDRollback, "tx_"))
+	if strings.TrimSpace(resp) != expected {
+		t.Errorf("Expected tables before rollback:\n%q\nGot:\n%q", expected, resp)
+	}
+
+	e.Execute(`ROLLBACK`)
+	resp = e.Execute(`SHOW TABLES`)
+	expected = "Tables:\n- perm_table\n- table1\n- tx_table_new" // tx_table_new should be back
+	if strings.TrimSpace(resp) != expected {
+		t.Errorf("Expected tables after rollback:\n%q\nGot:\n%q", expected, resp)
+	}
+
+	// Scenario 9: Invalid SHOW syntax
+	resp = e.Execute(`SHOW TABLES foo`)
+	if !strings.HasPrefix(resp, "Parse error: invalid SHOW syntax") {
+		t.Errorf("Expected parse error for invalid SHOW syntax, got %q", resp)
+	}
+	resp = e.Execute(`SHOW`)
+	if !strings.HasPrefix(resp, "Parse error: invalid SHOW syntax") {
+		t.Errorf("Expected parse error for invalid SHOW syntax, got %q", resp)
+	}
+}

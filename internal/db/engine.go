@@ -54,7 +54,7 @@ func (e *Engine) Execute(cmd string) string {
 		return "Parse error: " + err.Error()
 	}
 
-	// Handle transaction control statements first
+	// Handle transaction control statements and new SHOW TABLES first
 	switch s := stmt.(type) {
 	case *BeginStatement:
 		_ = s // Acknowledge 's' is declared but not directly used
@@ -87,6 +87,8 @@ func (e *Engine) Execute(cmd string) string {
 				e.tables[tableName] = tree
 			}
 			for key, value := range kvs {
+				// Check if the key already exists in the BPlusTree.
+				// If it does, call Update; otherwise, call Insert.
 				if _, exists := tree.Get(key); exists {
 					tree.Update(key, value)
 				} else {
@@ -128,6 +130,9 @@ func (e *Engine) Execute(cmd string) string {
 		e.txDroppedTables = nil
 		e.wal.RollbackTx(txIDToRollback) // Updated WAL call
 		return fmt.Sprintf("Transaction %s rolled back.", txIDToRollback)
+
+	case *ShowTablesStatement: // Handle new SHOW TABLES statement
+		return e.showTables()
 
 	default:
 		if e.currentTxID == "" {
@@ -447,4 +452,51 @@ func (e *Engine) executeInTransaction(stmt Statement) string {
 	default:
 		return fmt.Errorf("unsupported statement in transaction mode: %s", stmt.StmtType()).Error()
 	}
+}
+
+// showTables returns a string listing all visible tables,
+// prefixing transactional tables with their transaction ID.
+func (e *Engine) showTables() string {
+	// Use a map to track unique table names and whether they are transactional
+	// tableName -> isTransactional (bool)
+	visibleTables := make(map[string]bool)
+
+	// Add tables from the main engine state, respecting txDrops
+	for tableName := range e.tables {
+		if _, dropped := e.txDroppedTables[tableName]; !dropped {
+			visibleTables[tableName] = false // Not transactional, from main state
+		}
+	}
+
+	// Overlay tables affected by txChanges (inserts/updates).
+	// If a table is in txChanges, it's considered "transactional" for display purposes
+	// (meaning it's either new in this transaction or modified within it).
+	for tableName := range e.txChanges {
+		// If it was dropped, it should not be listed, even if it had txChanges
+		if _, dropped := e.txDroppedTables[tableName]; !dropped {
+			visibleTables[tableName] = true // This table has transactional changes
+		}
+	}
+
+	// Collect table names and sort them
+	var tableNames []string
+	for tableName := range visibleTables {
+		tableNames = append(tableNames, tableName)
+	}
+	sort.Strings(tableNames)
+
+	if len(tableNames) == 0 {
+		return "No tables found."
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Tables:\n")
+	for _, tableName := range tableNames {
+		if visibleTables[tableName] && e.currentTxID != "" {
+			sb.WriteString(fmt.Sprintf("- [%s] %s\n", strings.TrimPrefix(e.currentTxID, "tx_"), tableName))
+		} else {
+			sb.WriteString(fmt.Sprintf("- %s\n", tableName))
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
