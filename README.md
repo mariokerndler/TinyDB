@@ -1,8 +1,8 @@
-# TinySQL
-TinySQL is a minimalistic database engine written in Go, demonstrating fundamental database concepts like parsing SQL-like commands, managing data in a B+ tree, and persistent storage via a Write-Ahead Log (WAL).
+# TinyDB
+TinyDB is a minimalistic database engine written in Go, demonstrating fundamental database concepts like parsing SQL-like commands, managing data in a B+ tree, and persistent storage via a Write-Ahead Log (WAL).
 
 ## Supported Commands
-This section outlines the SQL-like commands currently supported by TinySQL.
+This section outlines the SQL-like commands currently supported by TinyDB.
 
 ###  1. INSERT Statement
 Used to insert key-value pairs into a specified table.
@@ -64,3 +64,87 @@ DROP <table_name>
 DROP users
 DROP products
 ```
+
+### 5. UPDATE Statement
+Used to modify the value associated with an existing key in a specified table.
+
+**Syntax:**
+```
+UPDATE <table_name> SET (<key1>, <new_value1>)[, (<key2>, <new_value2>)...]
+```
+
+**Examples:**
+```
+UPDATE users SET (id1, Alicia)
+UPDATE products SET (prod_a, GamingLaptop), (prod_b, WirelessMouse)
+```
+### 6. SHOW TABLES Statement
+Used to list all currently existing tables in the database. If the database is within a transaction, tables created or modified within that transaction will be prefixed with the transaction ID.
+
+**Syntax:**
+```
+SHOW TABLES
+```
+
+**Examples:**
+```
+SHOW TABLES
+```
+
+**Output Example (outside transaction):**
+```
+Tables:
+- users
+- products
+```
+
+**Output Example (inside transaction, where `new_users` was created in the transaction `tx_12345`):**
+```
+Tables:
+- products
+- users
+- [tx_12345] new_users
+```
+
+## Transaction Management
+TinyDB supports basic transaction management, allowing a series of operations to be grouped and either committed or rolled back. This provides atomicity for operations.
+
+### BEGIN Statement
+Initiates a new transaction. If a transaction is already active, it will return an error.
+
+**Syntax:**
+```
+BEGIN
+```
+
+**Example:**
+```
+BEGIN
+```
+
+### COMMIT Statement
+Applies all changes buffered within the current transaction to the main database. Once committed, the changes are permanent and written to the WAL.
+
+**Syntax:**
+```
+COMMIT
+```
+
+**Example:**
+```
+COMMIT
+```
+
+### ROLLBACK Statement
+Discards all changes buffered within the current transaction, effectively undoing any operations performed since the `BEGIN` statement. The database reverts to its state before the transaction began.
+
+**Syntax:**
+```
+ROLLBACK
+```
+
+**Example:**
+```
+ROLLBACK
+```
+

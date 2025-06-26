@@ -30,7 +30,15 @@ func NewBPlusTree() *BPlusTree {
 }
 
 // --- INSERT IMPLEMENTATION ---
-func (t *BPlusTree) Insert(key, value string) {
+// Insert inserts a key-value pair only if the key does not already exist.
+// Returns true if the insertion was successful (key was new), false otherwise.
+func (t *BPlusTree) Insert(key, value string) bool {
+	// Check if the key already exists before attempting insert
+	if _, found := t.Get(key); found {
+		return false
+	}
+
+	// If key does not exist, proceed with the insertion logic
 	_, midKey, sibling := t.root.insert(key, value)
 
 	if sibling != nil {
@@ -44,6 +52,7 @@ func (t *BPlusTree) Insert(key, value string) {
 		newRoot.children = append(newRoot.children, t.root, sibling)
 		t.root = newRoot
 	}
+	return true
 }
 
 // insert recursively inserts a key-value pair.
@@ -51,17 +60,12 @@ func (t *BPlusTree) Insert(key, value string) {
 // - promotedNode: always nil for now (can be used for more complex scenarios)
 // - promotedKey: the key that needs to be promoted to the parent
 // - newSibling: the new node created due to a split
+// This function assumes the key does NOT already exist in the leaf.
 func (n *BPlusTreeNode) insert(key, value string) (*BPlusTreeNode, string, *BPlusTreeNode) {
 	if n.isLeaf {
 		i := 0
 		for i < len(n.keys) && n.keys[i] < key {
 			i++
-		}
-
-		// If key already exists, update the value
-		if i < len(n.keys) && n.keys[i] == key {
-			n.values[i] = value
-			return nil, "", nil // No split, no promotion
 		}
 
 		// Insert key and value at the correct position
@@ -152,6 +156,31 @@ func (n *BPlusTreeNode) splitInternal() (*BPlusTreeNode, string, *BPlusTreeNode)
 }
 
 // --- END INSERT IMPLEMENTATION ---
+
+// --- UPDATE IMPLEMENTATION ---
+// Update attempts to update the value for an existing key.
+// Returns true if the key was found and updated, false otherwise.
+func (t *BPlusTree) Update(key, newValue string) bool {
+	node := t.root
+	for !node.isLeaf {
+		i := 0
+		for i < len(node.keys) && key >= node.keys[i] {
+			i++
+		}
+		node = node.children[i]
+	}
+
+	// Now 'node' is the leaf node that should contain the key
+	for i, k := range node.keys {
+		if k == key {
+			node.values[i] = newValue // Update the value
+			return true
+		}
+	}
+	return false // Key not found
+}
+
+// --- END UPDATE IMPLEMENTATION ---
 
 // --- GET IMPLEMENTATION ---
 func (t *BPlusTree) Get(key string) (string, bool) {

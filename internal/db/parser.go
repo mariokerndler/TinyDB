@@ -25,6 +25,16 @@ func Parse(input string) (Statement, error) {
 		return parseDelete(tokens)
 	case "DROP":
 		return parseDrop(tokens)
+	case "UPDATE":
+		return parseUpdate(tokens)
+	case "BEGIN":
+		return parseBegin(tokens)
+	case "COMMIT":
+		return parseCommit(tokens)
+	case "ROLLBACK":
+		return parseRollback(tokens)
+	case "SHOW":
+		return parseShow(tokens)
 	default:
 		return nil, fmt.Errorf("unsupported statement: %s", tokens[0])
 	}
@@ -48,7 +58,7 @@ func parseInsert(tokens []string) (Statement, error) {
 	}
 
 	intoIndex := -1
-	for i := 0; i < len(tokens); i++ {
+	for i := range tokens {
 		if strings.ToUpper(tokens[i]) == "INTO" {
 			intoIndex = i
 			break
@@ -223,4 +233,90 @@ func parseDrop(tokens []string) (Statement, error) {
 		return nil, errors.New("expected DROP table_name")
 	}
 	return &DropStatement{Table: tokens[1]}, nil
+}
+
+func parseUpdate(tokens []string) (Statement, error) {
+	// Expected format: UPDATE tablename SET (key1, value1), (key2, value2)
+	// Minimum tokens: UPDATE t SET (k, v) (8 tokens)
+	if len(tokens) < 8 {
+		return nil, errors.New("invalid UPDATE syntax: too few arguments")
+	}
+	if strings.ToUpper(tokens[0]) != "UPDATE" {
+		return nil, errors.New("expected UPDATE keyword")
+	}
+
+	table := tokens[1]
+	if table == "" {
+		return nil, errors.New("invalid UPDATE syntax: expected table name after UPDATE")
+	}
+
+	setIndex := -1
+	for i := 2; i < len(tokens); i++ { // Start search from index 2, after "UPDATE tablename"
+		if strings.ToUpper(tokens[i]) == "SET" {
+			setIndex = i
+			break
+		}
+	}
+
+	if setIndex == -1 {
+		return nil, errors.New("invalid UPDATE syntax: expected SET keyword")
+	}
+	if setIndex != 2 { // UPDATE tablename SET ...
+		return nil, errors.New("invalid UPDATE syntax: SET keyword in wrong position")
+	}
+
+	// The key-value pairs are the tokens after "SET"
+	valuesTokens := tokens[setIndex+1:]
+	if len(valuesTokens) == 0 {
+		return nil, errors.New("invalid UPDATE syntax: no key-value pairs after SET")
+	}
+
+	rawValues := strings.Join(valuesTokens, "")
+	matches := pairRegex.FindAllStringSubmatch(rawValues, -1)
+	if len(matches) == 0 {
+		return nil, errors.New("invalid UPDATE syntax: no valid (key, value) pairs found after SET")
+	}
+
+	var values []KeyValue
+	for _, match := range matches {
+		if len(match) != 3 {
+			return nil, errors.New("invalid match format for key-value pairs")
+		}
+		key := strings.TrimSpace(match[1])
+		value := strings.TrimSpace(match[2])
+		values = append(values, KeyValue{Key: key, Value: value})
+	}
+
+	return &UpdateStatement{
+		Table:  table,
+		Values: values,
+	}, nil
+}
+
+func parseBegin(tokens []string) (Statement, error) {
+	if len(tokens) != 1 || strings.ToUpper(tokens[0]) != "BEGIN" {
+		return nil, errors.New("invalid BEGIN syntax: expected 'BEGIN'")
+	}
+	return &BeginStatement{}, nil
+}
+
+func parseCommit(tokens []string) (Statement, error) {
+	if len(tokens) != 1 || strings.ToUpper(tokens[0]) != "COMMIT" {
+		return nil, errors.New("invalid COMMIT syntax: expected 'COMMIT'")
+	}
+	return &CommitStatement{}, nil
+}
+
+func parseRollback(tokens []string) (Statement, error) {
+	if len(tokens) != 1 || strings.ToUpper(tokens[0]) != "ROLLBACK" {
+		return nil, errors.New("invalid ROLLBACK syntax: expected 'ROLLBACK'")
+	}
+	return &RollbackStatement{}, nil
+}
+
+func parseShow(tokens []string) (Statement, error) {
+	if len(tokens) == 2 && strings.ToUpper(tokens[0]) == "SHOW" && strings.ToUpper(tokens[1]) == "TABLES" {
+		return &ShowTablesStatement{}, nil
+	}
+	return nil, errors.New("invalid SHOW syntax: expected 'SHOW TABLES'")
 }

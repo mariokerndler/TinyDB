@@ -47,3 +47,33 @@ type DropStatement struct {
 func (s *DropStatement) StmtType() string {
 	return "DROP"
 }
+
+// --- UPDATE STATEMENT ---
+type UpdateStatement struct {
+	Table  string
+	Values []KeyValue
+}
+
+func (s *UpdateStatement) StmtType() string {
+	return "UPDATE"
+}
+
+// --- BEGIN STATEMENT ---
+type BeginStatement struct{}
+
+func (s *BeginStatement) StmtType() string { return "BEGIN" }
+
+// --- COMMIT STATEMENT ---
+type CommitStatement struct{}
+
+func (s *CommitStatement) StmtType() string { return "COMMIT" }
+
+// --- ROLLBACK STATEMENT ---
+type RollbackStatement struct{}
+
+func (s *RollbackStatement) StmtType() string { return "ROLLBACK" }
+
+// --- SHOW TABLES STATEMENT ---
+type ShowTablesStatement struct{}
+
+func (s *ShowTablesStatement) StmtType() string { return "SHOW TABLES" }
