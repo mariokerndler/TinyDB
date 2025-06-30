@@ -55,6 +55,11 @@ func (w *WAL) BeginTx(txID string) {
 
 func (w *WAL) CommitTx(txID string) {
 	fmt.Fprintf(w.file, "COMMIT_TX %s\n", txID)
+
+	// Crucial for durability: ensure all pending writes are flushed to disk.
+	if err := w.file.Sync(); err != nil {
+		fmt.Printf("WAL Sync error during Commit: %v\n", err)
+	}
 }
 
 func (w *WAL) RollbackTx(txID string) {
