@@ -14,16 +14,16 @@ func main() {
 	// Initialize your database engine
 	engine := db.NewEngine("data.log")
 
-	fmt.Println("Welcome to TinySQL! Type 'QUIT' or 'EXIT' to exit.")
+	fmt.Println("Welcome to TinyDB! Type 'QUIT' or 'EXIT' to exit.")
 
 	// Configure readline
 	// HistoryFile can be set to store command history across sessions.
 	// AutoComplete can be used for command suggestions, but is not implemented here.
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:          "tinysql> ",
-		HistoryFile:     "/tmp/tinysql_history.txt", // Store history in a temporary file
-		InterruptPrompt: "^C",                       // Text shown when Ctrl+C is pressed
-		EOFPrompt:       "exit",                     // Text shown when Ctrl+D is pressed
+		Prompt:          "tinydb> ",
+		HistoryFile:     "/tmp/tinydb_history.txt", // Store history in a temporary file
+		InterruptPrompt: "^C",                      // Text shown when Ctrl+C is pressed
+		EOFPrompt:       "exit",                    // Text shown when Ctrl+D is pressed
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize readline: %v\n", err)
